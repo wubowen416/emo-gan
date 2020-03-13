@@ -16,22 +16,22 @@ if __name__ == "__main__":
     
 
     # network config
-    latent_code_size = 5
+    latent_code_size = 10 # dim of latent code
     hidden_size = 256
-    generator_output_size = 30
+    generator_output_size = 30 # motion data
     discriminator_output_size = 1 # binary classification
     num_layers = 2
-    bidirectional = True
+    bidirectional = True # discriminator direction
     relu_slope = 1e-2 # leaky relu
 
     # training config
     epochs = 10
-    batch_size = 8
-    sample_size = 64
+    batch_size = 8 # number of samples to train g in pretrain
+    sample_size = 64 # number of samples to train d&g over one epoch
     learning_rate = {'pretrain': 1e-4, 'g': 1e-2, 'd': 1e-2}
-    k_step = 1
+    k_step = 1 # step of training discriminator over one epoch
     dropout = 0
-    pretrain_epochs = 0
+    pretrain_epochs = 0 # 0 is not to do pretrain
     teacher_forcing_rate = 0.7
 
     save_path = '/home/wu/projects/emo-gan/chkpt/rnngan'
