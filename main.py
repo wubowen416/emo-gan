@@ -1,4 +1,5 @@
 import pickle
+import numpy as np
 
 from dataloader import MyDataset
 from gan import GAN
@@ -15,23 +16,25 @@ if __name__ == "__main__":
     
 
     # network config
-    latent_code_size = 10
-    hidden_size = 128
+    latent_code_size = 5
+    hidden_size = 256
     generator_output_size = 30
-    discriminator_output_size = 1
-    num_layers = 1
-    bidirectional = False
+    discriminator_output_size = 1 # binary classification
+    num_layers = 2
+    bidirectional = True
+    relu_slope = 1e-2 # leaky relu
 
     # training config
-    epochs = 100
+    epochs = 10
     batch_size = 8
-    learning_rate = 1e-4
+    sample_size = 64
+    learning_rate = {'pretrain': 1e-4, 'g': 1e-2, 'd': 1e-2}
     k_step = 1
     dropout = 0
-    patience = 20
-    test_size = 0.2
-    pretrain_epochs = 20
+    pretrain_epochs = 0
     teacher_forcing_rate = 0.7
+
+    save_path = '/home/wu/projects/emo-gan/chkpt/rnngan'
 
 
     
@@ -41,7 +44,7 @@ if __name__ == "__main__":
 
     dataset = MyDataset(data, max_len=max_len, num_joints=3, dim=dim)
 
-    gan = GAN(latent_code_size, hidden_size, generator_output_size, discriminator_output_size, num_layers, bidirectional, dropout, max_len=300)
+    gan = GAN(latent_code_size, hidden_size, generator_output_size, discriminator_output_size, num_layers, bidirectional, relu_slope, dropout, max_len=300)
     
-    gan.fit(dataset, epochs, batch_size, learning_rate, k_step, patience, test_size, pretrain_epochs, teacher_forcing_rate)
+    gan.fit(dataset, epochs, batch_size, sample_size, learning_rate, k_step, pretrain_epochs, teacher_forcing_rate, save_path)
 
