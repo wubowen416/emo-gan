@@ -1,9 +1,12 @@
 import collections
 import pickle
+import numpy as np
 
 import torch
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
+
+from sklearn.preprocessing import MinMaxScaler
 
 
 class MyDataset(Dataset):
@@ -14,7 +17,10 @@ class MyDataset(Dataset):
         self.num_joints = num_joints
         self.dim = dim
 
+        self.scaler = MinMaxScaler(feature_range=(-1, 1))
+
         self.data = self.select()
+        self.data = self.scale()
         self.data = list(map(torch.FloatTensor, self.data))
         self.data = self.pad()
 
@@ -22,10 +28,20 @@ class MyDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
+        pass
         return self.data[idx]
 
     def pad(self):
         return pad_sequence(self.data, batch_first=True, padding_value=.0)
+
+    def scale(self):
+        concat_data = np.concatenate(self.data, axis=0)
+        self.scaler.fit(concat_data)
+        scaled_data = list(map(self.scaler.transform, self.data))
+        return scaled_data
+    
+    def rescale(self, x):
+        return self.scaler.inverse_transform(x)
 
     def select(self):
         """Selection a sub dataset from original one."""
@@ -36,7 +52,7 @@ class MyDataset(Dataset):
         # take samples of the biggest category
         cats_sorted = [cat for cat, _ in sorted(
             zip(cats, counts), key=lambda pair: pair[1], reverse=True)]
-        selected_cat = cats_sorted[1]
+        selected_cat = cats_sorted[1] # the most cat is xxx, here take the second most cat
         idxs = [idx for idx, label in enumerate(
             self.labels) if label == selected_cat]
         self.targets = [self.targets[idx] for idx in idxs]

@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 
+import time
 import random
 import pandas as pd
 import numpy as np
@@ -48,15 +49,17 @@ class GAN:
             dataset,
             epochs,
             batch_size,
-            sample_size, 
+            sample_size,
             learning_rate,
             k_step,
+            sample_rate,
             pretrain_epochs,
             teacher_forcing_rate,
             save_path):
         print("[INFO] Start fitting model")
         self.batch_size = batch_size
         self.sample_size = sample_size
+        n_step = int(np.ceil(sample_size / batch_size))
         # convert to tensor
         train_set = dataset
         train_loader = DataLoader(
@@ -68,11 +71,11 @@ class GAN:
                      'train': {'d0_loss': [], 'd0_acc': [], 'd1_loss': [], 'd1_acc': [], 'g_loss': []}}
         self.pretrain_optimizer = optim.Adam(
             self.generator.parameters(), lr=learning_rate['pretrain'])
+        self.pretrain_criterion = nn.MSELoss()
         self.generator_optimizer = optim.Adam(
             self.generator.parameters(), lr=learning_rate['g'])
         self.discriminator_optimizer = optim.Adam(
             self.discriminator.parameters(), lr=learning_rate['d'])
-        self.pretrain_criterion = nn.MSELoss()
         self.discriminator_criterion = DLoss()
         self.generator_criterion = GLoss()
         #################
@@ -81,9 +84,11 @@ class GAN:
         if pretrain_epochs:
             print("[INFO] Pre-Train model {} epochs on {} training samples".format(
                 pretrain_epochs, len(train_set)))
+            
             for epoch in range(pretrain_epochs):
+                start_time = time.time()
                 sum_loss = 0
-                for target_batch in tqdm(train_loader):
+                for target_batch in train_loader:
                     use_teacher_forcing = True if random.random() < teacher_forcing_rate else False
                     target_batch = target_batch.to(device)
                     latent_code_batch = self._sample_latent_code_batch(
@@ -94,7 +99,7 @@ class GAN:
                         target_batch, latent_code_batch, init_hidden, use_teacher_forcing)
                 batch_loss = np.divide(sum_loss, len(train_loader))
                 print(
-                    "[INFO] Pre-Train Epoch {} -- MSE Loss: {:.6f}".format(epoch+1, batch_loss))
+                    "[INFO] Pre-Train Epoch {} - {:.2f}s: MSE Loss: {:.6f}".format(epoch+1, time.time()-start_time, batch_loss))
                 # save log
                 self.hist['pretrain']['loss'].append(batch_loss)
                 torch.save(self.generator.state_dict(),
@@ -102,9 +107,10 @@ class GAN:
             print("[INFO] Pre-Train finished")
         # save generated result of pre-train
         _, generated_examples_batch = self._sample_pos_neg_examples(
-            train_set, batch_size)
+            train_set, 10)  # 10 is how many samples to generated and save
         result = generated_examples_batch.transpose(
             0, 1).cpu().detach().numpy()
+        rescaled_result = np.array(list(map(dataset.rescale, result)))
         np.save('/home/wu/projects/emo-gan/generated/pretrain_result.npy', result)
         #########################
         ### Adversarial Train ###
@@ -112,39 +118,52 @@ class GAN:
         print("[INFO] Start Adversarial Training")
         add_label = True
         for epoch in range(epochs):
+            start_time = time.time()
             ###########################
             ### Train Discriminaotr ###
             ###########################
-            d0_sum_loss = 0
-            d0_sum_acc = 0
-            d1_sum_loss = 0
-            d1_sum_acc = 0
-            for k in range(k_step):
-                positive_examples_batch, negative_examples_batch = self._sample_pos_neg_examples(
-                    train_set, batch_size)
-                loss, acc = self._discriminator_train_step(
-                    positive_examples_batch, negative_examples_batch)
-                d0_sum_loss += loss['n_loss']
-                d0_sum_acc += acc['n_acc']
-                d1_sum_loss += loss['p_loss']
-                d1_sum_acc += acc['p_acc']
-            d0_loss = np.divide(d0_sum_loss, k_step)
-            d0_acc = np.divide(d0_sum_acc, k_step)
-            d1_loss = np.divide(d1_sum_loss, k_step)
-            d1_acc = np.divide(d1_sum_acc, k_step)
+            d0_sum_loss_n = 0
+            d0_sum_acc_n = 0
+            d1_sum_loss_n = 0
+            d1_sum_acc_n = 0
+            for _ in range(n_step):  # train model with n times batch-size number of examples
+                d0_sum_loss_k = 0
+                d0_sum_acc_k = 0
+                d1_sum_loss_k = 0
+                d1_sum_acc_k = 0
+                for _ in range(k_step):
+                    positive_examples_batch, negative_examples_batch = self._sample_pos_neg_examples(
+                        train_set, batch_size)
+                    loss, acc = self._discriminator_train_step(
+                        positive_examples_batch, negative_examples_batch)
+                    d0_sum_loss_k += loss['n_loss']
+                    d0_sum_acc_k += acc['n_acc']
+                    d1_sum_loss_k += loss['p_loss']
+                    d1_sum_acc_k += acc['p_acc']
+                d0_sum_loss_n += np.divide(d0_sum_loss_k, k_step)
+                d0_sum_acc_n += np.divide(d0_sum_acc_k, k_step)
+                d1_sum_loss_n += np.divide(d1_sum_loss_k, k_step)
+                d1_sum_acc_n += np.divide(d1_sum_acc_k, k_step)
+            d0_loss = np.divide(d0_sum_loss_n, n_step)
+            d0_acc = np.divide(d0_sum_acc_n, n_step)
+            d1_loss = np.divide(d1_sum_loss_n, n_step)
+            d1_acc = np.divide(d1_sum_acc_n, n_step)
             #######################
             ### Train Generator ###
             #######################
+            g_sum_loss_n = 0
+            for _ in range(n_step):
+                _, generated_examples_batch = self._sample_pos_neg_examples(
+                    train_set, batch_size)
+                # train step
+                g_sum_loss_n += self._generator_train_step(
+                    generated_examples_batch)
+            g_loss = np.divide(g_sum_loss_n, n_step)
+            # generate examples using trained generator and save
             _, generated_examples_batch = self._sample_pos_neg_examples(
-                train_set, batch_size)
-            # train step
-            g_loss = self._generator_train_step(
-                generated_examples_batch)
-            # generate examples using trained generator
-            _, generated_examples_batch = self._sample_pos_neg_examples(
-                train_set, batch_size)
-            print("[INFO] Epoch {} -- d0_loss: {:.6f}, d0_acc: {:.2f}, d1_loss: {:.6f}, d1_acc: {:.2f}, g_loss: {:.6f}".format(
-                epoch+1, d0_loss, d0_acc, d1_loss, d1_acc, g_loss))
+                train_set, 10)  # 10 is how many samples to generated and save
+            print("[INFO] Epoch {} - {:.1f}s: d0_loss: {:.6f}, d0_acc: {:.2f}, d1_loss: {:.6f}, d1_acc: {:.2f}, g_loss: {:.6f}".format(
+                epoch+1, time.time()-start_time, d0_loss, d0_acc, d1_loss, d1_acc, g_loss))
             # save log
             self.hist['train']['d0_loss'].append(d0_loss)
             self.hist['train']['d0_acc'].append(d0_acc)
@@ -157,27 +176,13 @@ class GAN:
                        save_path + '_generator.pt')
             torch.save(self.discriminator.state_dict(),
                        save_path + '_discriminator.pt')
-            # plot learning curve
-            fig, (ax1, ax2) = plt.subplots(2, 1, dpi=150)
-            ax1.set_title('loss')
-            ax1.plot(self.hist['train']['d0_loss'], label='d-fake')
-            ax1.plot(self.hist['train']['d1_loss'], label='d-real')
-            ax1.plot(self.hist['train']['g_loss'], label='gen')
-            ax1.grid()
-            ax1.legend()
-            ax2.set_title('acc')
-            ax2.plot(self.hist['train']['d0_acc'], label='fake')
-            ax2.plot(self.hist['train']['d1_acc'], label='real')
-            ax2.grid()
-            ax2.legend()
-            add_label = False
-            plt.savefig('curve.png')
-            plt.close()
+            self._plot_loss()
             # save generated sequence every 100 epochs
-            if epoch % 1000 == 0:
+            if epoch % sample_rate == 0:
                 # save generated result of adversarial train
                 result = generated_examples_batch.transpose(
                     0, 1).cpu().detach().numpy()
+                rescaled_result = np.array(list(map(dataset.rescale, result)))
                 np.save(
                     '/home/wu/projects/emo-gan/generated/adversarial_result_epoch_{}.npy'.format(epoch), result)
 
@@ -286,7 +291,7 @@ class GAN:
         with MSE loss
         """
         self.generator.train()
-        self.generator_optimizer.zero_grad()
+        self.pretrain_optimizer.zero_grad()
         target_batch.transpose_(0, 1)
         latent_code_batch.transpose_(0, 1)
         first_motion_input = target_batch[0]
@@ -299,28 +304,45 @@ class GAN:
                 first_motion_input, latent_code_batch, init_hidden, teacher_sequence=None)
         loss = self.pretrain_criterion(all_motion_outputs, target_batch)
         loss.backward()
-        self.generator_optimizer.step()
+        self.pretrain_optimizer.step()
         return loss.item()
 
-    def _sample_pos_neg_examples(self, dataset, batch_size):
+    def _sample_pos_neg_examples(self, dataset, sample_size):
         real_examples_batch = self._sample_examples_batch(
-            dataset, batch_size).transpose(0, 1).to(device)
+            dataset, sample_size).transpose(0, 1).to(device)
         first_motion_input = real_examples_batch[0]
         latent_code_batch = self._sample_latent_code_batch(
-            batch_size, self.max_len, self.latent_code_size).transpose(0, 1).to(device)
+            sample_size, self.max_len, self.latent_code_size).transpose(0, 1).to(device)
         init_hidden = self.generator.zero_hidden_state(
-            batch_size).to(device)
+            sample_size).to(device)
         generated_examples_batch, _ = self.generate_sequence(
             first_motion_input, latent_code_batch, init_hidden, teacher_sequence=None)
         return real_examples_batch, generated_examples_batch
 
-    def _sample_examples_batch(self, dataset, batch_size):
+    def _sample_examples_batch(self, dataset, sample_size):
         """Randomly choose number of batch_size samples from dataset"""
-        sampled_idxs = np.random.choice(len(dataset), batch_size)
+        sampled_idxs = np.random.choice(len(dataset), sample_size)
         sampled_examples = torch.cat(
             [dataset[i].unsqueeze(0) for i in sampled_idxs])
         return sampled_examples
 
-    def _sample_latent_code_batch(self, batch_size, time_step, latent_code_size):
+    def _sample_latent_code_batch(self, sample_size, time_step, latent_code_size):
         """Normal distribution random value"""
-        return torch.rand(batch_size, time_step, latent_code_size)
+        return torch.rand(sample_size, time_step, latent_code_size)
+
+    def _plot_loss(self):
+        # plot learning curve
+        fig, (ax1, ax2) = plt.subplots(2, 1, dpi=150)
+        ax1.set_title('loss')
+        ax1.plot(self.hist['train']['d0_loss'], label='d-fake')
+        ax1.plot(self.hist['train']['d1_loss'], label='d-real')
+        ax1.plot(self.hist['train']['g_loss'], label='gen')
+        ax1.grid()
+        ax1.legend()
+        ax2.set_title('acc')
+        ax2.plot(self.hist['train']['d0_acc'], label='fake')
+        ax2.plot(self.hist['train']['d1_acc'], label='real')
+        ax2.grid()
+        ax2.legend()
+        plt.savefig('curve.png')
+        plt.close()
