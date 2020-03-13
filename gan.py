@@ -328,7 +328,7 @@ class GAN:
 
     def _sample_latent_code_batch(self, sample_size, time_step, latent_code_size):
         """Normal distribution random value"""
-        return torch.rand(sample_size, time_step, latent_code_size)
+        return torch.randn(sample_size, time_step, latent_code_size)
 
     def _plot_loss(self):
         # plot learning curve
@@ -342,7 +342,9 @@ class GAN:
         ax2.set_title('acc')
         ax2.plot(self.hist['train']['d0_acc'], label='fake')
         ax2.plot(self.hist['train']['d1_acc'], label='real')
+        ax2.set_ylim([0, 1])
         ax2.grid()
         ax2.legend()
+        plt.tight_layout()
         plt.savefig('curve.png')
         plt.close()

@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     # network config
     latent_code_size = 10  # dim of latent code
-    hidden_size = 256
+    hidden_size = 128
     generator_output_size = 30  # motion data
     discriminator_output_size = 1  # binary classification
     num_layers = 2
