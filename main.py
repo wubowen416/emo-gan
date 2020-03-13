@@ -26,7 +26,7 @@ if __name__ == "__main__":
 
     # training config
     epochs = 10
-    batch_size = 8 # number of samples to train g in pretrain
+    batch_size = 8 # mini-batch size
     sample_size = 64 # number of samples to train d&g over one epoch
     learning_rate = {'pretrain': 1e-4, 'g': 1e-2, 'd': 1e-2}
     k_step = 1 # step of training discriminator over one epoch
